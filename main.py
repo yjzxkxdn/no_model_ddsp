@@ -2,8 +2,10 @@ import torch
 import numpy as np
 import parselmouth as pm
 import soundfile as sf
+import matplotlib.pyplot as plt
+import yaml
 
-from vocoder import Sins
+from vocoder import Sins, CombSub
 from loss import HybridLoss
 from utils import interp_f0, expand_uv
 
@@ -66,18 +68,32 @@ def main(input_audio, config, device):
 
     batch = input_audio.shape[0]
 
-    # 初始化模型并移动到指定设备
-    model = Sins(
-        sampling_rate=config.sampling_rate,
-        block_size=config.block_size,
-        win_length=config.win_length,
-        use_mean_filter=config.use_mean_filter,
-        n_harmonics=config.n_harmonics,
-        n_mag_noise=config.n_mag_noise,
-        batch=batch,
-        n_frames=n_frames,
-        device=device
-    )
+    if config.model == "Sins":
+        model = Sins(
+            sampling_rate=config.sampling_rate,
+            block_size=config.block_size,
+            win_length=config.win_length,
+            use_mean_filter=config.use_mean_filter,
+            n_harmonics=config.n_harmonics,
+            n_mag_noise=config.n_mag_noise,
+            prediction_phase = config.prediction_phase,
+            batch=batch,
+            n_frames=n_frames,
+            device=device
+        )
+    elif config.model == "CombSub":
+        model = CombSub(
+            sampling_rate=config.sampling_rate,
+            block_size=config.block_size,
+            win_length=config.win_length,
+            use_mean_filter=config.use_mean_filter,
+            n_mag_harmonic=config.n_mag_harmonic,
+            n_mag_noise=config.n_mag_noise,
+            prediction_phase = config.prediction_phase,
+            batch=batch,
+            n_frames=n_frames,
+            device=device
+        )
 
     lr = config.lr
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
@@ -98,7 +114,7 @@ def main(input_audio, config, device):
 
         optimizer.zero_grad()
 
-        output_signal, sinusoids, (harmonic, noise) = model(f0)  
+        output_signal, sinusoids, (harmonic, noise), f0_pred = model(f0_frames = f0)  
 
         loss, loss_rss, loss_uv = criterion(output_signal, harmonic, input_audio, uv)
 
@@ -110,34 +126,40 @@ def main(input_audio, config, device):
 
         print(f"Epoch [{epoch+1}/{num_epochs}], Lr: {optimizer.param_groups[0]['lr']:.4f}, Loss: {loss.item():.4f}, RSS Loss: {loss_rss.item():.4f}, UV Loss: {loss_uv.item():.4f}")
 
-    # 返回最终生成的信号
-    return output_signal
+    return output_signal, sinusoids, (harmonic, noise), f0, f0_pred
 
 if __name__ == '__main__':
-    # 读取音频
-    input_audio, sr = sf.read(r"E:\VOCODER000000000000000000000000000000000000000000000\ddsp_no_model\约定vocal.wav")
+
+    input_audio, sr = sf.read(r"约定vocal.wav")
+    config_path = r"CombSub.yaml"
     input_audio = torch.from_numpy(input_audio).unsqueeze(0)
-    print(input_audio.shape)
-    # 读取配置
-    config = DotDict({
-        "sampling_rate": 44100,
-        "block_size": 512,
-        "win_length": 2048,
-        "use_mean_filter": False,
-        "n_harmonics": 64,
-        "n_mag_noise": 256,
-        "n_frames": 1000,
-        "lr": 0.01,
-        "num_epochs": 1000,
-        "f0_min": 40,
-        "f0_max": 700,
-        "fft_min": 256,
-        "fft_max": 2048,
-        "n_scale": 4,
-        "lambda_uv": 1,
-        "device": "cuda"
-    })
-    # 运行模型
-    output_audio = main(input_audio, config, device=config.device)
-    # 保存音频
+    config = DotDict(yaml.load(open(config_path, "r"), Loader=yaml.FullLoader))
+    print(config)
+
+    output_audio, _, (harmonic, noise), f0, f0_pred = main(input_audio, config, device=config.device)
+
     sf.write("output.wav", output_audio.detach().squeeze().cpu().numpy(), sr)
+    sf.write("harmonic.wav", harmonic.detach().squeeze().cpu().numpy(), sr) 
+    sf.write("noise.wav", noise.detach().squeeze().cpu().numpy(), sr) 
+    
+    # 绘制 F0 图
+    plt.figure(figsize=(10, 5))
+    plt.plot(f0.detach().squeeze().cpu().numpy())
+
+    
+    plt.legend([ 'Ground Truth'])
+    plt.title('F0 Comparison')
+    plt.xlabel('Frame')
+    plt.ylabel('Frequency (Hz)')
+
+    plt.figure(figsize=(10, 5))
+    plt.plot(f0_pred.detach().squeeze().cpu().numpy())
+    plt.legend([ 'Predicted'])
+    plt.title('F0 Comparison')
+    plt.xlabel('Frame')
+    plt.ylabel('Frequency (Hz)')
+    plt.show()
+    
+
+    
+    
