@@ -1,5 +1,6 @@
 model: CombSub
 prediction_phase: False
+prediction_f0: False
 sampling_rate: 44100
 block_size: 512
 win_length: 2048

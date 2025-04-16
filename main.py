@@ -68,6 +68,11 @@ def main(input_audio, config, device):
 
     batch = input_audio.shape[0]
 
+    if config.prediction_f0:
+        f0_frames_input = f0
+    else:
+        f0_frames_input = None
+        
     if config.model == "Sins":
         model = Sins(
             sampling_rate=config.sampling_rate,
@@ -79,7 +84,8 @@ def main(input_audio, config, device):
             prediction_phase = config.prediction_phase,
             batch=batch,
             n_frames=n_frames,
-            device=device
+            device=device,
+            f0_frames = f0_frames_input,
         )
     elif config.model == "CombSub":
         model = CombSub(
@@ -92,7 +98,8 @@ def main(input_audio, config, device):
             prediction_phase = config.prediction_phase,
             batch=batch,
             n_frames=n_frames,
-            device=device
+            device=device,
+            f0_frames = f0_frames_input,
         )
 
     lr = config.lr
@@ -114,7 +121,10 @@ def main(input_audio, config, device):
 
         optimizer.zero_grad()
 
-        output_signal, sinusoids, (harmonic, noise), f0_pred = model(f0_frames = f0)  
+        if config.prediction_f0:
+            output_signal, sinusoids, (harmonic, noise), f0_pred = model()  
+        else:
+            output_signal, sinusoids, (harmonic, noise), f0_pred = model(f0)  
 
         loss, loss_rss, loss_uv = criterion(output_signal, harmonic, input_audio, uv)
 
@@ -145,8 +155,6 @@ if __name__ == '__main__':
     # 绘制 F0 图
     plt.figure(figsize=(10, 5))
     plt.plot(f0.detach().squeeze().cpu().numpy())
-
-    
     plt.legend([ 'Ground Truth'])
     plt.title('F0 Comparison')
     plt.xlabel('Frame')
@@ -155,6 +163,14 @@ if __name__ == '__main__':
     plt.figure(figsize=(10, 5))
     plt.plot(f0_pred.detach().squeeze().cpu().numpy())
     plt.legend([ 'Predicted'])
+    plt.title('F0 Comparison')
+    plt.xlabel('Frame')
+    plt.ylabel('Frequency (Hz)')
+    
+    plt.figure(figsize=(10, 5))
+    plt.plot(f0.detach().squeeze().cpu().numpy())
+    plt.plot(f0_pred.detach().squeeze().cpu().numpy())
+    plt.legend([ 'Ground Truth', 'Predicted'])
     plt.title('F0 Comparison')
     plt.xlabel('Frame')
     plt.ylabel('Frequency (Hz)')
