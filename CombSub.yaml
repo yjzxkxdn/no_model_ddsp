@@ -8,8 +8,8 @@ use_mean_filter: True
 n_mag_harmonic: 512
 n_mag_noise: 256
 n_frames: 1000
-lr: 0.02
-num_epochs: 5000
+lr: 0.1
+num_epochs: 1000
 f0_min: 40
 f0_max: 700
 fft_min: 256

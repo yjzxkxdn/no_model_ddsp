@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from core import frequency_filter, mean_filter, upsample
+from ddsp.core import frequency_filter, mean_filter, upsample
 
 class Sins(nn.Module):
     def __init__(self, 
@@ -15,6 +15,10 @@ class Sins(nn.Module):
             batch,
             n_frames,
             device,
+            amplitudes = None,
+            harmonic_phase = None,
+            noise_magnitude = None,
+            noise_phase = None,
             f0_frames = None
         ):
         super().__init__()
@@ -26,27 +30,43 @@ class Sins(nn.Module):
         self.device = device
         
         # Parameters with correct device handling
-        self.amplitudes = nn.Parameter(
-            torch.zeros(batch, n_frames, n_harmonics, device=device) * 0.1,
-            requires_grad=True
-        )
-        if prediction_phase:
-            self.harmonic_phase = nn.Parameter(
-                torch.zeros(batch, n_frames, win_length // 2 + 1, device=device) * 0.1,
+        if amplitudes is None:
+            self.amplitudes = nn.Parameter(
+                torch.zeros(batch, n_frames, n_harmonics, device=device) * 0.1,
                 requires_grad=True
             )
         else:
+            self.amplitudes = nn.Parameter(amplitudes, requires_grad=True)
+        
+        if prediction_phase:
+            if harmonic_phase is None:
+                self.harmonic_phase = nn.Parameter(
+                    torch.zeros(batch, n_frames, win_length // 2 + 1, device=device) * 0.1,
+                    requires_grad=True
+                )
+            else:
+                self.harmonic_phase = nn.Parameter(harmonic_phase, requires_grad=True)
+        else:
             self.harmonic_phase = None
-        self.noise_magnitude = nn.Parameter(
-            torch.zeros(batch, n_frames, n_mag_noise, device=device) * 0.1,
-            requires_grad=True
-        )
-        self.noise_phase = nn.Parameter(
-            torch.zeros(batch, n_frames, n_mag_noise, device=device) * 0.1,
-            requires_grad=True
-        )
+            
+        if noise_magnitude is None:
+            self.noise_magnitude = nn.Parameter(
+                torch.zeros(batch, n_frames, n_mag_noise, device=device) * 0.1,
+                requires_grad=True
+            )
+        else:
+            self.noise_magnitude = nn.Parameter(noise_magnitude, requires_grad=True)
+            
+        if noise_phase is None:
+            self.noise_phase = nn.Parameter(
+                torch.zeros(batch, n_frames, n_mag_noise, device=device) * 0.1,
+                requires_grad=True
+            )
+        else:
+            self.noise_phase = nn.Parameter(noise_phase, requires_grad=True)
+            
         if f0_frames is not None:
-            self.f0 = nn.Parameter(f0_frames, requires_grad=True)
+            self.f0 = nn.Parameter(torch.log(f0_frames), requires_grad=True)
         else:
             self.f0 = None
             
@@ -142,6 +162,10 @@ class CombSub(torch.nn.Module):
             batch,
             n_frames,
             device,
+            harmonic_magnitude = None,
+            harmonic_phase = None,
+            noise_magnitude = None,
+            noise_phase = None,
             f0_frames = None
         ):
         super().__init__()
@@ -156,29 +180,43 @@ class CombSub(torch.nn.Module):
         self.prediction_phase = prediction_phase
         
         # Parameters with correct device handling
-        self.harmonic_magnitude = nn.Parameter(
-            torch.zeros(batch, n_frames, n_mag_harmonic, device=device) * 0.1,
-            requires_grad=True
-        )
-        if prediction_phase:
-            self.harmonic_phase = nn.Parameter(
-                torch.zeros(batch, n_frames, win_length // 2 + 1, device=device) * 0.1,
+        if harmonic_magnitude is None:
+            self.harmonic_magnitude = nn.Parameter(
+                torch.zeros(batch, n_frames, n_mag_harmonic, device=device) * 0.1,
                 requires_grad=True
             )
         else:
-            self.harmonic_phase = None
-        self.noise_magnitude = nn.Parameter(
-            torch.zeros(batch, n_frames, n_mag_noise, device=device) * 0.1,
-            requires_grad=True
-        )
-        self.noise_phase = nn.Parameter(
-            torch.zeros(batch, n_frames, n_mag_noise, device=device) * 0.1,
-            requires_grad=True
-        )
-        if f0_frames is not None:
-            self.f0 = nn.Parameter(f0_frames, requires_grad=True)
+            self.harmonic_magnitude = nn.Parameter(harmonic_magnitude, requires_grad=True)
+        if prediction_phase:
+            if harmonic_phase is None:
+                self.harmonic_phase = nn.Parameter(
+                    torch.zeros(batch, n_frames, win_length // 2 + 1, device=device) * 0.1,
+                    requires_grad=True
+                )
+            else:
+                self.harmonic_phase = nn.Parameter(harmonic_phase, requires_grad=True)
         else:
-            self.f0 = None
+            self.harmonic_phase = None
+        
+        if noise_magnitude is None:
+            self.noise_magnitude = nn.Parameter(
+                torch.zeros(batch, n_frames, n_mag_noise, device=device) * 0.1,
+                requires_grad=True
+            )
+        else:
+            self.noise_magnitude = nn.Parameter(noise_magnitude, requires_grad=True)
+        if noise_phase is None:
+            self.noise_phase = nn.Parameter(
+                torch.zeros(batch, n_frames, n_mag_noise, device=device) * 0.1,
+                requires_grad=True
+            )
+        if f0_frames is not None:
+            #self.f0 = nn.Parameter(f0_frames, requires_grad=True)
+            self.log_f0 = nn.Parameter(torch.log(f0_frames), requires_grad=True)
+        else:
+            self.log_f0 = None
+            
+        
 
         # mean filter kernel size
         if use_mean_filter:
@@ -207,7 +245,7 @@ class CombSub(torch.nn.Module):
             f0_frames: B x n_frames x 1
         '''
         if f0_frames is None:
-            f0_frames = self.f0
+            f0_frames = torch.exp(self.log_f0)
         # combtooth exciter signal
         combtooth = self.fast_source_gen(f0_frames)
         

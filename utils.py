@@ -1,7 +1,11 @@
+from matplotlib import pyplot as plt
 import numpy as np
+import scipy
 import torch
 import torch.nn as nn
 from scipy.interpolate import CubicSpline
+import parselmouth as pm
+import seaborn as sns
 
 def get_mel_fn(
         sr     : float, 
@@ -158,6 +162,75 @@ def upsample(signal, factor):
     signal = signal[:,:,:-1]
     return signal
 
+class DotDict(dict):
+    def __getattr__(self, attr):
+        return self.get(attr)
+    def __setattr__(self, key, value):
+        self[key] = value
+
+def analyze_model_parameters(model):
+    # 存储所有参数的统计信息
+    param_stats = {}
+
+    for name, param in model.named_parameters():
+        if param.requires_grad:
+            param_data = param.data.cpu().numpy().flatten()  # 展平为一维数组
+            
+            # 计算统计特征
+            stats = {
+                "mean": np.mean(param_data),
+                "std": np.std(param_data),
+                "min": np.min(param_data),
+                "max": np.max(param_data),
+                "median": np.median(param_data),
+                "skewness": scipy.stats.skew(param_data),
+                "kurtosis": scipy.stats.kurtosis(param_data),
+                "q1": np.percentile(param_data, 25),
+                "q3": np.percentile(param_data, 75),
+                "90th_percentile": np.percentile(param_data, 90),
+                "99th_percentile": np.percentile(param_data, 99),
+            }
+            
+            param_stats[name] = stats
+
+            # 打印统计信息
+            print(f"Parameter: {name}")
+            for key, value in stats.items():
+                print(f"  {key}: {value:.4f}")
+
+            # 绘制直方图和密度估计图
+            plt.figure(figsize=(10, 4))
+            sns.histplot(param_data, kde=True, bins=50, color="blue")
+            plt.title(f"Distribution of Parameter: {name}")
+            plt.xlabel("Value")
+            plt.ylabel("Density")
+            plt.show()
+
+    return param_stats
+
+def extract_f0_parselmouth(config, x: np.ndarray, n_frames):
+    l_pad = int(
+            np.ceil(
+                1.5 / config.f0_min * config.sampling_rate
+            )
+    )
+    r_pad = config.block_size * ((len(x) - 1) // config.block_size + 1) - len(x) + l_pad + 1
+    padded_signal = np.pad(x, (l_pad, r_pad))
+    
+    sound = pm.Sound(padded_signal, config.sampling_rate)
+    pitch = sound.to_pitch_ac(
+        time_step=config.block_size / config.sampling_rate, 
+        voicing_threshold=0.6,
+        pitch_floor=config.f0_min, 
+        pitch_ceiling=1100
+    )
+    
+    f0 = pitch.selected_array['frequency']
+    if len(f0) < n_frames:
+        f0 = np.pad(f0, (0, n_frames - len(f0)))
+    f0 = f0[:n_frames]
+
+    return f0
 
 if __name__ == '__main__':
     # test
